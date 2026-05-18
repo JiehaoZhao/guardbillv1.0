@@ -4,8 +4,42 @@ import 'bill_scan_service.dart';
 import 'features/extraction/models/financial_obligation_candidate.dart';
 import 'features/extraction/services/financial_extraction_service.dart';
 import 'features/extraction/llm/utils/asset_copier.dart';
+import 'models/bill_data.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+final FlutterLocalNotificationsPlugin
+    flutterLocalNotificationsPlugin =
+        FlutterLocalNotificationsPlugin();
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化本地通知
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initializationSettings =
+      InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+
+  // 这里测试创建一条账单
+  final bill = BillData(
+    billType: 'Credit Card',
+    issuer: 'American Express',
+    amountDue: 1200,
+    minimumDue: 50,
+    currency: 'USD',
+    dueDate: '2026-05-20',
+    riskLevel: 'HIGH',
+    isRecurring: true,
+    createdAt: DateTime.now().toIso8601String(),
+  );
+  
+
+  print(bill.toJson());
+  
   runApp(const GuardBillApp());
 }
 
@@ -38,8 +72,7 @@ class GuardBillDashboardPage extends StatefulWidget {
 
 class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
   final BillScanService _scanService = BillScanService();
-  final FinancialExtractionService _extractionService =
-      FinancialExtractionService();
+  final FinancialExtractionService _extractionService = FinancialExtractionService();
 
   final List<FinancialObligationCandidate> _protectedObligations = [];
   bool _isEngineProcessing = false;
@@ -57,8 +90,7 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
       await AssetCopier.getModelPath(onProgress: (progress) {
         setState(() {
           _modelDownloadProgress = progress;
-          _modelStatus =
-              'Downloading AI Core: ${(progress * 100).toStringAsFixed(0)}%';
+          _modelStatus = 'Downloading AI Core: ${(progress * 100).toStringAsFixed(0)}%';
         });
       });
       setState(() {
@@ -73,13 +105,13 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
     }
   }
 
+  /// 🚀 扫描触发后直接以文本形式输出结果，跳过任何文本预览界面
   Future<void> _activateFinancialProtection() async {
     setState(() {
       _isEngineProcessing = true;
     });
 
-    final List<BillOcrResult> ocrResults =
-        await _scanService.convertImageToOcrText();
+    final List<BillOcrResult> ocrResults = await _scanService.convertImageToOcrText();
 
     if (ocrResults.isEmpty) {
       setState(() {
@@ -90,223 +122,61 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
 
     for (var ocrItem in ocrResults) {
       await Future.delayed(const Duration(milliseconds: 200));
+      
+      // 执行混合提取流水线(Regex -> Context Slicer -> Qwen)
       final List<FinancialObligationCandidate> candidates =
           await _extractionService.extractFinancialObligations(ocrItem.rawText);
 
       if (candidates.isNotEmpty) {
-        _presentReviewBottomSheet(candidates.first, ocrItem.localImagePath);
+        final candidate = candidates.first;
+        
+        // 直接转换为审计文本并输出，不再弹出任何 BottomSheet 预览界面
+        final String formattedPlainText = _convertToAuditablePlainText(candidate);
+        
+        print("==================================================================");
+        print("✅ [GuardBill 审计文本输出成功]");
+        print(formattedPlainText);
+        print("==================================================================");
+
+        setState(() {
+          _protectedObligations.insert(0, candidate);
+        });
       }
     }
 
     setState(() {
       _isEngineProcessing = false;
     });
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚡ Extraction complete. Text results appended to local pipeline.'),
+          backgroundColor: Color(0xFF004D40),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
-  void _presentReviewBottomSheet(
-      FinancialObligationCandidate candidate, String imagePath) {
-    final TextEditingController providerController =
-        TextEditingController(text: candidate.providerName);
-    final TextEditingController amountController = TextEditingController(
-      text:
-          candidate.amount != null ? candidate.amount!.toStringAsFixed(2) : '',
-    );
-    final TextEditingController dateController = TextEditingController(
-      text: candidate.dueDate != null
-          ? candidate.dueDate!.toIso8601String().substring(0, 10)
-          : '2026-05-17',
-    );
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            top: 24,
-            left: 24,
-            right: 24,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '🛡️ GuardBill Review',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF004D40),
-                        ),
-                      ),
-                      Text(
-                        'Possible financial obligation detected',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.teal[50],
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'AI Confidence: ${(candidate.confidence * 100).toStringAsFixed(0)}%',
-                      style: TextStyle(
-                        color: Colors.teal[800],
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const Divider(height: 24),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  height: 100,
-                  width: double.infinity,
-                  color: Colors.grey[100],
-                  child: Image.file(File(imagePath), fit: BoxFit.cover),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: providerController,
-                decoration: InputDecoration(
-                  labelText: 'Detected Provider',
-                  prefixIcon: const Icon(Icons.business, color: Colors.teal),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: amountController,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(fontWeight: FontWeight.bold),
-                decoration: InputDecoration(
-                  labelText: '',
-                  prefixIcon:
-                      const Icon(Icons.monetization_on, color: Colors.amber),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: dateController,
-                decoration: InputDecoration(
-                  labelText: 'Detected Due Date',
-                  prefixIcon:
-                      const Icon(Icons.calendar_today, color: Colors.blue),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'EXPLAINABILITY AUDIT TRAIL',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey,
-                  letterSpacing: 0.5,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[200]!),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: candidate.matchedSignals.map((signal) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Text(
-                        '• $signal',
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontSize: 11,
-                          color: Colors.blueGrey,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    setState(() {
-                      _protectedObligations.insert(
-                        0,
-                        FinancialObligationCandidate(
-                          sourceText: candidate.sourceText,
-                          providerName: providerController.text,
-                          category: candidate.category,
-                          amount: double.tryParse(amountController.text),
-                          currency: candidate.currency,
-                          dueDate: DateTime.tryParse(dateController.text),
-                          recurring: candidate.recurring,
-                          recurrenceType: candidate.recurrenceType,
-                          confidence: candidate.confidence,
-                          matchedSignals: candidate.matchedSignals,
-                        ),
-                      );
-                    });
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          '⚡ Financial protection activated. Monitoring running locally.',
-                        ),
-                        backgroundColor: Color(0xFF004D40),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.shield, color: Colors.white),
-                  label: const Text(
-                    'Activate Financial Protection',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF00695C),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  /// 📝 专为离线系统定制的「可审计结构化纯文本」格式生成器
+  String _convertToAuditablePlainText(FinancialObligationCandidate candidate) {
+    final StringBuffer buffer = StringBuffer();
+    
+    buffer.writeln("[OBLIGATION LOCKED]");
+    buffer.writeln("-> Provider Name : ${candidate.providerName}");
+    buffer.writeln("-> Category      : ${candidate.category}");
+    buffer.writeln("-> Amount Locked : ${candidate.formattedAmount}");
+    buffer.writeln("-> Due Date      : ${candidate.formattedDueDate}");
+    buffer.writeln("-> Recurring Type: ${candidate.recurring ? candidate.recurrenceType : 'None (One-time Bill)'}");
+    buffer.writeln("-> Confidence    : ${candidate.confidencePercent}");
+    buffer.writeln("\n[EXPLAINABILITY AUDIT TRAIL]");
+    
+    for (String signal in candidate.matchedSignals) {
+      buffer.writeln(" • $signal");
+    }
+    
+    return buffer.toString();
   }
 
   @override
@@ -322,11 +192,7 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
       appBar: AppBar(
         title: const Text(
           '🛡️ GuardBill',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-            letterSpacing: 1.0,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 1.0),
         ),
         backgroundColor: const Color(0xFF004D40),
         centerTitle: true,
@@ -337,19 +203,14 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  CircularProgressIndicator(color: Color(0xFF004D40)),
+                  SizedBox(height: 16),
                   Text(
                     'Parsing local obligation matrix...',
-                    style: TextStyle(
-                      color: Color(0xFF004D40),
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                    ),
+                    style: TextStyle(color: Color(0xFF004D40), fontWeight: FontWeight.w600, fontSize: 15),
                   ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Local AI core is preparing',
-                    style: TextStyle(color: Colors.grey, fontSize: 13),
-                  ),
+                  SizedBox(height: 4),
+                  Text('Local AI core is executing pipeline', style: TextStyle(color: Colors.grey, fontSize: 13)),
                 ],
               ),
             )
@@ -358,23 +219,9 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Text(
-                        'Preparing AI Core',
-                        style: TextStyle(
-                          color: Color(0xFF004D40),
-                          fontWeight: FontWeight.w700,
-                          fontSize: 15,
-                        ),
-                      ),
+                      const Text('Preparing AI Core', style: TextStyle(color: Color(0xFF004D40), fontWeight: FontWeight.w700, fontSize: 15)),
                       const SizedBox(height: 16),
-                      Text(
-                        _modelStatus,
-                        style: const TextStyle(
-                          color: Color(0xFF004D40),
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
+                      Text(_modelStatus, style: const TextStyle(color: Color(0xFF004D40), fontWeight: FontWeight.w600, fontSize: 14)),
                       const SizedBox(height: 8),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 48),
@@ -382,7 +229,6 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
                           value: _modelDownloadProgress,
                           backgroundColor: Colors.grey[200],
                           color: const Color(0xFF00695C),
-                          borderRadius: BorderRadius.circular(4),
                           minHeight: 6,
                         ),
                       ),
@@ -394,22 +240,11 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.gpp_maybe_rounded,
-                              size: 80, color: Colors.teal[100]),
+                          Icon(Icons.gpp_maybe_rounded, size: 80, color: Colors.teal[100]),
                           const SizedBox(height: 16),
-                          const Text(
-                            'No financial obligations detected yet.',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black54,
-                            ),
-                          ),
+                          const Text('No financial obligations detected yet.', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black54)),
                           const SizedBox(height: 4),
-                          const Text(
-                            'Scan a document to begin monitoring.',
-                            style: TextStyle(color: Colors.grey, fontSize: 13),
-                          ),
+                          const Text('Scan a document to begin monitoring.', style: TextStyle(color: Colors.grey, fontSize: 13)),
                         ],
                       ),
                     )
@@ -422,44 +257,21 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
                           color: Colors.white,
                           elevation: 2,
                           margin: const EdgeInsets.only(bottom: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           child: ListTile(
                             contentPadding: const EdgeInsets.all(16),
                             leading: CircleAvatar(
-                              backgroundColor: item.recurring
-                                  ? Colors.orange[50]
-                                  : Colors.teal[50],
+                              backgroundColor: item.recurring ? Colors.orange[50] : Colors.teal[50],
                               child: Icon(
-                                item.recurring
-                                    ? Icons.autorenew_rounded
-                                    : Icons.description_rounded,
-                                color: item.recurring
-                                    ? Colors.orange[800]
-                                    : Colors.teal[800],
+                                item.recurring ? Icons.autorenew_rounded : Icons.description_rounded,
+                                color: item.recurring ? Colors.orange[800] : Colors.teal[800],
                               ),
                             ),
-                            title: Text(
-                              item.providerName,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.bold, fontSize: 16),
-                            ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'Due: ${item.dueDate != null ? item.dueDate!.toIso8601String().substring(0, 10) : "N/A"}',
-                                style: const TextStyle(
-                                    fontSize: 12, color: Colors.grey),
-                              ),
-                            ),
+                            title: Text(item.providerName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            subtitle: Text('Due: ${item.formattedDueDate}', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                             trailing: Text(
-                              '${item.currency ?? '\$'}${item.amount?.toStringAsFixed(2) ?? '0.00'}',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFFD32F2F),
-                              ),
+                              item.formattedAmount,
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
                             ),
                           ),
                         );
@@ -469,10 +281,7 @@ class _GuardBillDashboardPageState extends State<GuardBillDashboardPage> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _activateFinancialProtection,
         icon: const Icon(Icons.document_scanner_rounded),
-        label: const Text(
-          'Scan Document',
-          style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5),
-        ),
+        label: const Text('Scan Document', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 0.5)),
         backgroundColor: const Color(0xFF004D40),
         foregroundColor: Colors.white,
         elevation: 4,
