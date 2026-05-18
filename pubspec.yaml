@@ -1,0 +1,29 @@
+name: guard_bill
+description: "A Privacy-First Paper Bill and Loss Prevention Management Tool."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+
+  # ======= 唯二核心依赖：纯本地、现代语法、完美上架标准 =======
+  cunning_document_scanner: ^1.2.0
+  google_mlkit_text_recognition: ^0.15.1
+  intl: ^0.19.0
+  device_calendar: ^4.3.3
+  ffi: ^2.2.0
+  dio: ^5.9.2
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
