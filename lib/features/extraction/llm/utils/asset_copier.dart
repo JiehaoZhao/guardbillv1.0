@@ -1,31 +1,30 @@
 import 'dart:io';
-
 import 'package:dio/dio.dart';
-
 import 'package:path_provider/path_provider.dart';
 
 class AssetCopier {
+  // 🚨 已更新为你的专属云端直连地址
+  static const String _modelCloudUrl = "https://pub-0ac71eb1d3c54212a9eacd9984157066.r2.dev/Qwen3.5-0.8B-Q3_K_M.gguf";
 
-  static const String _modelCloudUrl = "https://pub-e47d59e8bf0c49d28b4b74736ed21ab6.r2.dev/qwen2.5-0.5b-instruct-q4_0.gguf";
-
-  static const int _minValidSizeBytes = 250 * 1024 * 1024;
+  // 🚨 关键校准：模型体积约 400MB，拦截线定为 350MB 杜绝破损入库
+  static const int _minValidSizeBytes = 350 * 1024 * 1024;
 
   static Future<String> getModelPath({Function(double)? onProgress}) async {
     final Directory docDir = await getApplicationDocumentsDirectory();
-    final String localModelPath = "${docDir.path}/qwen_q4_core.gguf";
+    final String localModelPath = "${docDir.path}/qwen_q4_core.gguf"; 
     final File file = File(localModelPath);
 
     if (await file.exists()) {
       final int fileSize = await file.length();
       if (fileSize >= _minValidSizeBytes) {
-        print("====== [GuardBill AI] 本地模型完整，大小: ${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB，秒级返回 ======");
+        print("====== [GuardBill AI] 检测到本地模型，大小: ${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB ======");
         return localModelPath;
       }
-      print("====== [GuardBill AI] 检测到残渣文件，大小仅 ${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB < 250MB，物理删除并重新下载 ======");
+      print("====== [GuardBill AI] 模型残缺 (仅 ${(fileSize / 1024 / 1024).toStringAsFixed(1)}MB)，正在物理重灌... ======");
       await file.delete();
     }
 
-    print("====== [GuardBill AI] 触发动态机制：正在从云端灌注 Q4 模型... ======");
+    print("====== [GuardBill AI] 正在从云端高性能灌注模型... ======");
     try {
       final Dio dio = Dio();
       await dio.download(
@@ -41,7 +40,7 @@ class AssetCopier {
       final int downloadedSize = await file.length();
       if (downloadedSize < _minValidSizeBytes) {
         await file.delete();
-        throw Exception("Downloaded model file is incomplete (${(downloadedSize / 1024 / 1024).toStringAsFixed(1)}MB < 250MB).");
+        throw Exception("模型灌注失败: 下载体积不足 (${(downloadedSize / 1024 / 1024).toStringAsFixed(1)}MB < 350MB).");
       }
 
       print("====== [GuardBill AI] 模型灌注完成，最终大小: ${(downloadedSize / 1024 / 1024).toStringAsFixed(1)}MB ======");
@@ -50,8 +49,8 @@ class AssetCopier {
       if (await file.exists()) {
         await file.delete();
       }
-      print("❌ [GuardBill AI] 模型下载失败: $e");
-      throw Exception("Advanced financial protection modules pending download.");
+      print("❌ [GuardBill AI] 下载异常: $e");
+      throw Exception("Financial engine init failed.");
     }
   }
 }
